@@ -1,2 +1,4 @@
 venv
 data/weather.csv
+data/word_counts.csv
+data/validate.csv
