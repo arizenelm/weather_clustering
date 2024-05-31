@@ -7,7 +7,6 @@ from matplotlib import pyplot as plt
 from itertools import product
 
 import scipy.spatial
-from yellowbrick.cluster import KElbowVisualizer
 
 import pyclustering
 from pyclustering.cluster.kmeans import kmeans as pyKMeans
@@ -18,7 +17,11 @@ from pyclustering.cluster.encoder import cluster_encoder
 
 from sklearn import preprocessing
 from sklearn.cluster import KMeans
+from sklearn.cluster import DBSCAN
 from sklearn.metrics import silhouette_score
+
+
+import clustering_utils
 
 # %%
 df_weather = pd.read_csv('data/weather.csv', index_col=0)
@@ -59,8 +62,8 @@ print(len(df_weather))
 df_weather.head()
 
 # %%
-weather_ids = pd.read_csv('data/weather_ids.csv', index_col=0, header=None, squeeze=True);
-weather_ids.head()
+weather_ids = pd.read_csv('data/weather_ids.csv', index_col=0, header=None).squeeze()
+weather_ids
 
 # %%
 cond_count = len(weather_ids)
@@ -103,31 +106,51 @@ X.head()
 # %%
 N = len(df_regions1)
 d_mean = np.zeros(len(weather_ids))
+d_mean_m = np.zeros(len(weather_ids))
 for j in range(len(weather_ids)) :
     d_temp = 0
+    d_temp_m = 0
     for i1, i2 in product(range(N), range(N)) :
         for m in range(12) :
             d_temp += (df_regions1.iloc[i1, m * len(weather_ids) + j] - df_regions1.iloc[i2, m * len(weather_ids) + j])**2
+            d_temp_m += (df_regions1.iloc[i1, m * len(weather_ids) + j] - df_regions1.iloc[i2, m * len(weather_ids) + j])
     d_mean[j] = ((d_temp / N**2) + 0.01)
+    d_mean_m[j] = ((d_temp_m / N**2) + 0.01)
 
 # %%
 d_mean_full = np.zeros(len(weather_ids) * 12)
+d_mean_full_m = np.zeros(len(weather_ids) * 12)
 for j in range(len(weather_ids) * 12) :
     d_temp = 0
+    d_temp_m = 0
     for i1, i2, in product(range(N), range(N)) :
         d_temp += (df_regions1.iloc[i1, j] - df_regions1.iloc[i2, j])**2
+        d_temp_m += (df_regions1.iloc[i1, j] - df_regions1.iloc[i2, j])
     d_mean_full[j] = (d_temp / N**2) + 0.01
+    d_mean_full_m[j] = (d_temp_m / N**2) + 0.01
 
 # %%
-w = np.array([(1.0 / N) / d_mean[i % 12] for i in range(12 * len(d_mean))])
-w /= np.linalg.norm(w)
+w = np.array([(1.0) / (d_mean[i % (12)]) for i in range(12 * len(d_mean))])
+w_m = np.array([(1.0) / (d_mean_m[i % 12]) for i in range(12 * len(d_mean))])
+w /= np.sum(w)
+w_m /= np.sum(w_m)
 
 # %%
-w_full = np.array([(1.0 / N) / d for d in d_mean_full])
-w_full /= np.linalg.norm(w_full)
+w_full = np.array([(1.0) / d for d in d_mean_full])
+w_full_m = np.array([(1.0) / d for d in d_mean_full_m])
+w_full /= np.sum(w_full)
+w_full_m /= np.sum(w_full_m)
 
 # %%
-weights = w
+temp = [100, 100, 100, 100, 100, 1, 100, 2, 100, 100, 1, 1, 2, 100, 1, 1, 1, 1]
+w_custom = np.array([(1.0) / (temp[i % len(temp)]) for i in range(12 * len(d_mean))])
+w_custom /= np.sum(w_custom)
+
+# %%
+weather_ids
+
+# %%
+weights = w_custom
 
 # %%
 euclidian_weightned_distance = lambda x, y : scipy.spatial.distance.euclidean(x, y, weights)
@@ -136,57 +159,26 @@ euclidian_weightned_distance = lambda x, y : scipy.spatial.distance.euclidean(x,
 manhattan_weightned_distance = lambda x, y : scipy.spatial.distance.cityblock(x, y, weights)
 
 # %%
-custom_distance = euclidian_weightned_distance
+cosine_weightned_distance = lambda x, y : scipy.spatial.distance.cosine(x, y, weights)
 
 # %%
-import warnings
-np.warnings = warnings
+#custom_distance = lambda x, y : scipy.spatial.distance.euclidean(x, y)
+custom_distance = cosine_weightned_distance
 
 # %%
-def KMeansCustom(X, custom_distance, n_clusters=2) :
-    metric = distance_metric(type_metric.USER_DEFINED, func=custom_distance)
-    initial_centers = kmeans_plusplus_initializer(X, n_clusters, random_state=5).initialize()
-    kmeans = pyKMeans(X, initial_centers=initial_centers, metric=metric)
-    kmeans.process()
-    pyClusters = kmeans.get_clusters()
-    pyEncoding = kmeans.get_cluster_encoding()
-    pyEncoder = cluster_encoder(pyEncoding, pyClusters, X)
-    pyLabels = pyEncoder.set_encoding(0).get_clusters()
-    wce = kmeans.get_total_wce()
-    return (pyLabels, wce)
+clustering_utils.silhouette_criteria((X), clustering_func=clustering_utils.KMeans, custom_distance=custom_distance)
+plt.legend(('s(k) - silhouette coef'))
+plt.ylabel('s = коэффициент силуэта')
+plt.show()
 
 # %%
-def elbow_criteria(X, custom_distance) :
-    sse = {}
-    for k in range(2, 12):
-        #kmeans = KMeans(n_clusters=k, max_iter=1000, n_init='auto').fit(X, sample_weight=w)
-        kmeans = KMeansCustom(X, custom_distance, n_clusters=k)
-        #X["clusters"] = kmeans.labels_
-        #print(X["clusters"])
-        sse[k] = kmeans[1]
-    plt.xticks([i for i in range(2, 15)])
-    plt.plot(list(sse.keys()), list(sse.values()))
-
-# %%
-def silhouette_criteria(X, custom_distance) :
-    silhouettes = []
-    for i in range(2, 15) :
-        #kmeans = KMeans(n_clusters=i, n_init='auto').fit(X)
-        kmeans = KMeansCustom(X, custom_distance, n_clusters=i)
-        label = kmeans[0]
-        silhouettes.append(silhouette_score(X, label, metric=custom_distance))
-    plt.xticks([i for i in range(2, 15)])
-    plt.plot([i for i in range(2, 15)], silhouettes)
-
-# %%
-silhouette_criteria(X, custom_distance)
-
-# %%
-elbow_criteria(X, custom_distance)
+clustering_utils.elbow_criteria(X, clustering_func=clustering_utils.KMeans, custom_distance=custom_distance)
+plt.ylabel('W = внутрикластерное расстояние')
+plt.legend('W')
 
 # %%
 #kmeans = KMeans(n_clusters=2).fit_predict((X))
-kmeans = KMeansCustom(X, custom_distance, n_clusters = 4)
+kmeans = clustering_utils.KMeans((X), custom_distance, n_clusters = 4)
 
 # %%
 df_regions_clustered = df_regions1.copy()
@@ -205,5 +197,66 @@ labels = df_regions_clustered['cluster_id']
 # %%
 sil_score = silhouette_score((X), labels, metric=custom_distance)
 sil_score
+
+# %%
+dbscan = DBSCAN(metric=euclidian_weightned_distance).fit(X)
+
+# %%
+df_regions_clustered_temp = df_regions_clustered[df_regions_clustered['cluster_id'] == 0].drop(['cluster_id', 'region_name'], axis=1)
+
+# %%
+df_weather_clusters = df_weather.copy()
+df_weather_clusters['cluster_id'] = [np.nan] * len(df_weather_clusters)
+df_weather_clusters['condition_name'] = [weather_ids[i] for i in df_weather_clusters['conditions_ids']]
+df_weather_clusters['condition_name'] = pd.Categorical(df_weather_clusters['condition_name'], list(df_weather_clusters['condition_name'].unique()))
+
+# %%
+for i in range(len(df_weather_clusters)) :
+    r = df_regions_clustered.iloc[df_weather_clusters.iloc[i]['region_ids']]['cluster_id']
+    df_weather_clusters.at[i, 'cluster_id'] = r
+    #print(df_regions_clustered.iloc[i]['cluster_id'])
+
+# %%
+df_weather_clusters.head()
+
+# %%
+stop_list = ['гололед, изморозь', "снегопад, снежный покров", "заморозки", "ветер", "дожди, ливни", "гроза", "паводки, подтопления, наводнения", "град", "лавины"]
+
+# %%
+interesting = ['мороз', 'лавины', 'сель', 'вулканическая активность', 'пылевая буря', 'ураган', 'смерч']
+
+# %%
+df_weather_clusters1 = df_weather_clusters[df_weather_clusters['condition_name'].isin(interesting)].dropna()
+
+# %%
+df_weather_clusters1['condition_name'] = pd.Categorical(df_weather_clusters1['condition_name'], 
+                                                        categories=['лавины', 'сель', 
+                                                                            "вулканическая активность", 
+                                                                            "мороз", "пылевая буря",
+                                                                            "ураган", "смерч"])
+
+# %%
+def get_smth(i) :
+    return df_weather_clusters[df_weather_clusters['cluster_id'] == i]['conditions_ids']
+
+# %%
+sns.histplot(get_smth(float(0)), stat='probability', discrete=True)
+plt.xticks(rotation=90)
+plt.ylim(0, 0.2)
+
+# %%
+sns.histplot(get_smth(float(1)), discrete=True, stat='probability')
+plt.xticks(rotation=90)
+plt.ylim(0, 0.2)
+
+# %%
+sns.histplot(get_smth(float(2)), discrete=True, stat='probability')
+plt.xticks(rotation=90)
+plt.ylim(0, 0.2)
+
+# %%
+sns.histplot(get_smth(float(3)), discrete=True, stat='probability')
+plt.xticks(rotation=90)
+plt.ylim(0, 0.2)
 
 

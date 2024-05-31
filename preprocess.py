@@ -264,7 +264,7 @@ weather2id = pd.read_csv('data/weather2id.csv', header = None, index_col = 0, sq
 # %%
 df['conditions_ids'] = [np.nan] * len(df)
 df['conditions'] = [np.nan] * len(df)
-df['condition_ids'] = df['conditions_ids'].astype('object')
+df['conditions_ids'] = df['conditions_ids'].astype('object')
 df['conditions'] = df['conditions_ids'].astype('object')
 
 # %%
@@ -275,11 +275,14 @@ for i in range(len(df)) :
         if w in weather2id.index :
             condition_ids.add(weather2id[w])
             conditions.add(weather_ids[weather2id[w]])
-    df['condition_ids'][i] = list(condition_ids)
+    df['conditions_ids'][i] = list(condition_ids)
     df['conditions'][i] = list(conditions)
 
 # %%
 df[['weather', 'conditions']].to_csv('data/validate.csv')
+
+# %%
+print(len(df[df['conditions_ids'].apply(lambda x : len(x) > 0)]), len(df))
 
 # %%
 df.to_csv('data/weather.csv')
